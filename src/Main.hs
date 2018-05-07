@@ -3,6 +3,7 @@ module Main where
 import Control.Monad as M
 import Control.Monad.Primitive (PrimMonad, PrimState)
 -- import Control.Monad.ST
+import Data.Maybe (isJust, fromJust)
 import Data.Vector.Fusion.Stream.Monadic as MS hiding ((++))
 import Data.Vector.Generic.Mutable as MGV
 import Data.Vector.Mutable as MV
@@ -79,27 +80,50 @@ data LifeSimulationAcc = LifeSimulationAcc
 
 lifeSimulationStepInstructions :: (PrimMonad m) => UGrid m Bool -> m [Instruction Bool]
 lifeSimulationStepInstructions g = do
-  (maxX, maxY) <- bounds g
+  (maxX, maxY) <- ugridBounds g
   let initialState = LifeSimulationAcc { maxX = maxX, maxY = maxY, instructionsAcc = [] }
   instructionsAcc <$> ifoldUGrid iteration initialState  g
   where
-    bounds :: (PrimMonad m, Unbox a) => UGrid m a -> m (Int, Int)
-    bounds (UGrid vv) = do
-      v <- MGV.read vv 0
-      return (MGV.length v - 1, MGV.length vv - 1)
-
     iteration :: (PrimMonad m) => Int -> Int -> NeighbourRows m Bool -> LifeSimulationAcc -> Bool -> m LifeSimulationAcc
-    iteration x y nr (LifeSimulationAcc maxX maxY acc) c = do
-      neighbourCells <- readNeighbourCells x (aboveRow nr) (thisRow nr) (belowRow nr)
-      undefined
+    iteration x y nr (lsa@(LifeSimulationAcc maxX maxY acc)) c = do
+      neighbourCells <- readNeighbourCells x nr
+      let aliveNeighbourCells = countTrue neighbourCells
+      return $ case instruction x y c aliveNeighbourCells of
+                  Just newInstruction -> lsa { instructionsAcc = newInstruction : instructionsAcc lsa }
+                  Nothing -> lsa
 
-    readNeighbourCells :: (PrimMonad m)
-                       => Int
-                       -> Maybe (MUV.MVector (PrimState m) Bool)
-                       -> MUV.MVector (PrimState m) Bool
-                       -> Maybe (MUV.MVector (PrimState m) Bool)
-                       -> m [Bool]
-    readNeighbourCells x above this below = undefined
+    instruction :: Int -> Int -> Bool-> Int -> Maybe (Instruction Bool)
+    instruction x y c aliveNeighbourCells
+      -- cell is alive
+      | c && aliveNeighbourCells < 2 = Just $ Instruction x y (SetCell False)  -- die of loneliness
+      | c && aliveNeighbourCells > 3 = Just $ Instruction x y (SetCell False)  -- die of overpopulation
+      | c                            = Nothing
+      -- cell is dead
+      | not c && aliveNeighbourCells == 3 = Just $ Instruction x y (SetCell True)  -- cell borns
+      | otherwise                         = Nothing
+
+ugridBounds :: (PrimMonad m, Unbox a) => UGrid m a -> m (Int, Int)
+ugridBounds (UGrid vv) = do
+  v <- MGV.read vv 0
+  return (MGV.length v - 1, MGV.length vv - 1)
+
+readNeighbourCells :: (PrimMonad m, Unbox a) => Int -> NeighbourRows m a -> m [a]
+readNeighbourCells x nr = do
+  aboveCells <- readMaybeRow (aboveRow nr)
+  thisCells <- readThisRow (thisRow nr)
+  belowCells <- readMaybeRow (belowRow nr)
+  return $ fromJust $ (>>= id) <$> sequence (Prelude.filter isJust [aboveCells, Just thisCells, belowCells])
+  where
+    readMaybeRow :: (PrimMonad m, Unbox a) => Maybe (MUV.MVector (PrimState m) a) -> m (Maybe [a])
+    readMaybeRow r = traverse sequence $ fmap (sequence cellReads) r
+      where cellReads = [flip MGV.read (x - 1), flip MGV.read x, flip MGV.read (x + 1)]
+
+    readThisRow :: (PrimMonad m, Unbox a) => MUV.MVector (PrimState m) a -> m [a]
+    readThisRow r = sequence (cellReads <*> [r])
+      where cellReads = [flip MGV.read (x - 1), flip MGV.read (x + 1)]
+
+countTrue :: [Bool] -> Int
+countTrue = Prelude.foldl (\n c -> if c then n + 1 else n) 0
 
 createGliderInstructions :: Int -> Int -> [Instruction Bool]
 createGliderInstructions x y = [
