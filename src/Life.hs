@@ -1,8 +1,8 @@
 module Life (
-    UGrid(..), Instruction(..), CellOperation(..)
+    UGrid(..), Instruction(..), CellOperation(..), NeighbourRows
   , test
   , makeEmptySquareUGrid
-  , imapUGrid, ifoldUGrid
+  , iforUGrid, ifoldUGrid
   , runInstructionUGrid, lifeSimulationStepInstructions
   , createGliderInstructions
 ) where
@@ -47,13 +47,13 @@ makeEmptySquareUGrid :: (PrimMonad m) => Int -> m (UGrid m Bool)
 makeEmptySquareUGrid n = fmap UGrid (MGV.replicateM n (MGV.replicate n False))
 
 printUGrid :: (Show a, Unbox a) => UGrid IO a -> IO ()
-printUGrid = imapUGrid (\x y _ c -> putStrLn (show x ++ "_" ++ show y ++ " " ++ show c))
+printUGrid = iforUGrid (\x y _ c -> putStrLn (show x ++ "_" ++ show y ++ " " ++ show c))
 
-imapUGrid :: (PrimMonad m, Unbox a) => (Int -> Int -> MUV.MVector (PrimState m) a -> a -> m ()) -> UGrid m a -> m ()
-imapUGrid f (UGrid vv) = imapMGV (\y v -> (imapMGV (\x c -> f x y v c) v)) vv
+iforUGrid :: (PrimMonad m, Unbox a) => (Int -> Int -> MUV.MVector (PrimState m) a -> a -> m ()) -> UGrid m a -> m ()
+iforUGrid f (UGrid vv) = iforMGV (\y v -> (iforMGV (\x c -> f x y v c) v)) vv
 
-imapMGV :: (PrimMonad m, MGV.MVector v a) => (Int -> a -> m ()) -> v (PrimState m) a -> m ()
-imapMGV f v = MS.mapM_ (uncurry f) (MS.indexed $ MGV.mstream v)
+iforMGV :: (PrimMonad m, MGV.MVector v a) => (Int -> a -> m ()) -> v (PrimState m) a -> m ()
+iforMGV f v = MS.mapM_ (uncurry f) (MS.indexed $ MGV.mstream v)
 
 ifoldUGrid :: (PrimMonad m, Unbox b) => (Int -> Int -> NeighbourRows m b -> a -> b -> m a) -> a -> UGrid m b -> m a
 ifoldUGrid f a (UGrid vv) = ifoldMGV (\y a1 v ->
@@ -93,7 +93,7 @@ lifeSimulationStepInstructions g = do
   where
     iteration :: (PrimMonad m) => Int -> Int -> NeighbourRows m Bool -> LifeSimulationAcc -> Bool -> m LifeSimulationAcc
     iteration x y nr (lsa@(LifeSimulationAcc maxX maxY acc)) c = do
-      neighbourCells <- readNeighbourCells x nr
+      neighbourCells <- readNeighbourCells x maxX nr
       let aliveNeighbourCells = countTrue neighbourCells
       return $ case instruction x y c aliveNeighbourCells of
                   Just newInstruction -> lsa { instructionsAcc = newInstruction : instructionsAcc lsa }
@@ -107,15 +107,15 @@ lifeSimulationStepInstructions g = do
       | c                            = Nothing
       -- cell is dead
       | not c && aliveNeighbourCells == 3 = Just $ Instruction x y (SetCell True)  -- cell borns
-      | otherwise                         = Nothing
+      | otherwise                         = Nothing                                -- nothing happens
 
 ugridBounds :: (PrimMonad m, Unbox a) => UGrid m a -> m (Int, Int)
 ugridBounds (UGrid vv) = do
   v <- MGV.read vv 0
   return (MGV.length v - 1, MGV.length vv - 1)
 
-readNeighbourCells :: (PrimMonad m, Unbox a) => Int -> NeighbourRows m a -> m [a]
-readNeighbourCells x nr = do
+readNeighbourCells :: (PrimMonad m, Unbox a) => Int -> Int -> NeighbourRows m a -> m [a]
+readNeighbourCells x maxX nr = do
   aboveCells <- readMaybeRow (aboveRow nr)
   thisCells <- readThisRow (thisRow nr)
   belowCells <- readMaybeRow (belowRow nr)
@@ -123,10 +123,13 @@ readNeighbourCells x nr = do
   where
     readMaybeRow :: (PrimMonad m, Unbox a) => Maybe (MUV.MVector (PrimState m) a) -> m (Maybe [a])
     readMaybeRow r = traverse sequence $ fmap (sequence cellReads) r
-      where cellReads = [flip MGV.read (x - 1), flip MGV.read x, flip MGV.read (x + 1)]
+      where
+        -- TODO: bound check
+        cellReads = [flip MGV.read (x - 1), flip MGV.read x, flip MGV.read (x + 1)]
 
     readThisRow :: (PrimMonad m, Unbox a) => MUV.MVector (PrimState m) a -> m [a]
     readThisRow r = sequence (cellReads <*> [r])
+      -- TODO: bound check
       where cellReads = [flip MGV.read (x - 1), flip MGV.read (x + 1)]
 
 countTrue :: [Bool] -> Int
