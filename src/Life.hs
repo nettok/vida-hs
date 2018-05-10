@@ -124,13 +124,18 @@ readNeighbourCells x maxX nr = do
     readMaybeRow :: (PrimMonad m, Unbox a) => Maybe (MUV.MVector (PrimState m) a) -> m (Maybe [a])
     readMaybeRow r = traverse sequence $ fmap (sequence cellReads) r
       where
-        -- TODO: bound check
-        cellReads = [flip MGV.read (x - 1), flip MGV.read x, flip MGV.read (x + 1)]
+        cellReads
+          | x == 0    = [flip MGV.read x, flip MGV.read (x + 1)]
+          | x == maxX = [flip MGV.read (x - 1), flip MGV.read x]
+          | otherwise = [flip MGV.read (x - 1), flip MGV.read x, flip MGV.read (x + 1)]
 
     readThisRow :: (PrimMonad m, Unbox a) => MUV.MVector (PrimState m) a -> m [a]
     readThisRow r = sequence (cellReads <*> [r])
-      -- TODO: bound check
-      where cellReads = [flip MGV.read (x - 1), flip MGV.read (x + 1)]
+      where
+        cellReads
+          | x == 0    = [flip MGV.read (x + 1)]
+          | x == maxX = [flip MGV.read (x - 1)]
+          | otherwise = [flip MGV.read (x - 1), flip MGV.read (x + 1)]
 
 countTrue :: [Bool] -> Int
 countTrue = Prelude.foldl (\n c -> if c then n + 1 else n) 0
