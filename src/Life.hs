@@ -4,6 +4,7 @@ module Life (
   , makeEmptySquareUGrid
   , iforUGrid, ifoldUGrid
   , runInstructionUGrid, lifeSimulationStepInstructions
+  , ugridBounds
   , createGliderInstructions
 ) where
 
