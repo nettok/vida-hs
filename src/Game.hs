@@ -1,6 +1,7 @@
 module Game where
 
 import Control.Monad (mapM_, unless)
+import System.Exit (exitSuccess)
 
 import Graphics.Gloss.Interface.IO.Game
 
@@ -59,7 +60,9 @@ render w = do
 handleEvents :: Event -> World -> IO World
 handleEvents e w =
   case e of
+    EventKey (SpecialKey KeyEsc) Down _ _ -> onQuitKey e w
     EventKey (SpecialKey KeySpace) Up _ _ -> onPauseKey e w
+    EventKey (MouseButton LeftButton) Up _ _ -> onClick e w
     _ -> return w
 
 update :: Float -> World -> IO World
@@ -73,5 +76,16 @@ update _ w = do
 -----------------
 -- Event handlers
 
+onQuitKey :: Event -> World -> IO World
+onQuitKey _ _ = exitSuccess
+
 onPauseKey :: Event -> World -> IO World
 onPauseKey e w = return $ w { wPaused = not $ wPaused w }
+
+onClick :: Event -> World -> IO World
+onClick (EventKey _ _ _ (windowX , windowY)) w = do
+  let gridX = truncate ((windowX + halfWidth) / (cellRadius * 2))
+  let gridY = truncate ((windowY - halfHeight) / (cellRadius * (-2)))
+  let toogleCell = Instruction gridX gridY (Life.TransformCell not)
+  Life.runInstructionUGrid (wGrid w) toogleCell
+  return w
